@@ -1,369 +1,247 @@
-# LendIQ - AI-Powered Loan Verification System
+# AI Loan Verification — Local Gemini Edition
 
-> An intelligent, automated loan verification platform powered by AWS Bedrock, multi-agent orchestration, and advanced document forensics.
+A local-first loan document verification application that keeps **FastAPI as the backend API framework**, with a React dashboard, OCR/document-forensics pipeline, SQLite workflow state, local filesystem artifacts, and Google Gemini for every generative-AI operation.
 
-[![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
-[![React](https://img.shields.io/badge/React-18.0+-61dafb.svg)](https://reactjs.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-009688.svg)](https://fastapi.tiangolo.com/)
-[![AWS](https://img.shields.io/badge/AWS-Bedrock-orange.svg)](https://aws.amazon.com/bedrock/)
+The application does **not** require cloud infrastructure or cloud-provider credentials. The only external service used by the application is the Gemini API.
 
-## Overview
+## Architecture
 
-LendIQ is a comprehensive loan verification system that leverages AI agents to automate the end-to-end loan application review process. It combines document tampering detection, cross-validation, account aggregator verification, and intelligent decision-making to streamline loan approvals.
-
-### Key Features
-
-- **Document Tampering Detection**: ResNet50 + ELA + Noise Analysis with GradCAM heatmaps
-- **Multi-Document Cross-Validation**: Automated verification across payslips, offer letters, bank statements, and Form16
-- **Account Aggregator Integration**: Real-time financial data verification using AA framework
-- **AI Decision Agent**: AWS Bedrock-powered intelligent loan decision making
-- **Risk Assessment**: DTI ratio calculation, loan eligibility, and risk tiering
-- **Cloud-Native**: S3 storage, serverless processing, no local file clutter
-- **Modern UI**: React-based dashboard with Material-UI components
-- **Real-Time Analytics**: Track applications, escalations, and approved loans
-
-##     Quick Start
-
-### Prerequisites
-
-- Python 3.11 or higher
-- Node.js 18 or higher
-- AWS Account with Bedrock access
-- Poppler (for PDF processing)
-
-### Installation
-
-1. **Clone the repository**
-```bash
-git clone <repository-url>
-cd Python
+```text
+React/Vite dashboard (localhost:3000)
+              |
+              v
+FastAPI API (localhost:8000)
+  |           |               |
+  |           |               +-- GeminiService --> Gemini API
+  |           +-- SQLite (application queues/status)
+  +-- local filesystem (documents, results, GradCAM images)
+              |
+              v
+VerificationOrchestrator
+  +-- document forensic analyzer (ELA, OCR, CNN, GradCAM)
+  +-- Gemini document extraction and cross-validation
+  +-- deterministic Account Aggregator checks
+  +-- Gemini risk and loan decision
 ```
 
-2. **Install Python dependencies**
+### Local replacements
+
+| Previous responsibility | Local implementation |
+| --- | --- |
+| Hosted object storage | `LocalStorage` rooted at `LOCAL_STORAGE_PATH` |
+| Hosted application lists/status | SQLite through `LoanDatabase` |
+| Hosted generative models | Google Gemini through the centralized `GeminiService` |
+| Hosted logs | Python application logging to the terminal |
+| Serverless workflow execution | Normal FastAPI and Python service modules |
+| Managed secrets | Local `.env` file (never commit it) |
+
+No queue or scheduler was present in the original implementation, so no Redis or cron service is required.
+
+## Prerequisites
+
+- Python 3.10 or newer
+- Node.js 18 or newer and npm
+- [Tesseract OCR](https://tesseract-ocr.github.io/tessdoc/Installation.html)
+- [Poppler](https://poppler.freedesktop.org/) command-line tools for PDF rasterization
+- A Gemini API key from [Google AI Studio](https://aistudio.google.com/app/apikey)
+
+On Ubuntu/Debian, the native OCR dependencies can typically be installed with:
+
 ```bash
+sudo apt-get update
+sudo apt-get install -y tesseract-ocr poppler-utils
+```
+
+On Windows, install Tesseract and Poppler and either add them to `PATH` or configure `TESSERACT_CMD` and `POPPLER_PATH` in `.env`.
+
+## Quick start
+
+### Linux/macOS
+
+```bash
+./setup.sh
+```
+
+Then edit `.env`, set `GEMINI_API_KEY`, and run:
+
+```bash
+./start_app.sh
+```
+
+### Windows PowerShell
+
+```powershell
+.\setup.ps1
+```
+
+Then edit `.env`, set `GEMINI_API_KEY`, and run:
+
+```powershell
+.\start_app.ps1
+```
+
+### Manual setup
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate                 # Windows: .venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
 pip install -r requirements.txt
+npm --prefix frontend install
+cp .env.example .env                     # Windows: Copy-Item .env.example .env
+python scripts/init_local.py
 ```
 
-3. **Install Poppler (Windows)**
+Start the services in separate terminals:
+
 ```bash
-# Download from: https://github.com/oschwartz10612/poppler-windows/releases/
-# Extract to: C:\Program Files\poppler\
-# Add to PATH: C:\Program Files\poppler\Library\bin\
+source .venv/bin/activate
+python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 ```
 
-4. **Configure AWS credentials**
 ```bash
-# Create .env file in project root
-echo AWS_ACCESS_KEY_ID=your_access_key > .env
-echo AWS_SECRET_ACCESS_KEY=your_secret_key >> .env
-echo AWS_REGION=us-east-1 >> .env
-echo S3_BUCKET_NAME=documents-loaniq >> .env
+npm --prefix frontend run dev
 ```
 
-5. **Install frontend dependencies**
+Open:
+
+- Dashboard: <http://localhost:3000>
+- API: <http://localhost:8000>
+- Interactive API docs: <http://localhost:8000/docs>
+
+## Gemini setup
+
+1. Create an API key in [Google AI Studio](https://aistudio.google.com/app/apikey).
+2. Copy `.env.example` to `.env`.
+3. Set:
+
+   ```dotenv
+   GEMINI_API_KEY=your_real_key
+   GEMINI_MODEL=gemini-2.5-flash
+   ```
+
+`gemini-2.5-flash` is the default stable model because the workflow makes several structured extraction and comparison calls. Change `GEMINI_MODEL` in `.env` to switch models without modifying code.
+
+All generative calls are centralized in `gemini_service.py`. Document extraction and cross-validation request JSON responses directly from Gemini, and the decision adapter preserves the previous callable response contract.
+
+## Local data layout
+
+The default local storage root is `data/documents`. Create one directory per loan/customer ID:
+
+```text
+data/documents/
+└── LID12345678/
+    ├── AA_data.json
+    ├── payslip.pdf
+    ├── offer_letter.pdf
+    ├── bank_statement.pdf
+    └── form16.pdf                 # optional
+```
+
+Accepted document extensions are PDF, PNG, JPG, and JPEG. The workflow recognizes files by keywords in their names:
+
+- payslip: filename contains `payslip`
+- offer letter: filename contains `offer`
+- bank statement: filename contains `bank`, `account`, or `statement`
+- Form 16: filename contains `form16` (optional)
+
+After adding or removing customer folders, initialize/synchronize the SQLite records:
+
 ```bash
-cd frontend
-npm install
+python scripts/init_local.py
 ```
 
-### Running the Application
+The backend also discovers new customer folders when `/customers` is requested.
 
-**Terminal 1 - Start Backend:**
+Generated data remains local:
+
+```text
+data/documents/LID12345678/
+├── results.json
+└── gradcam/
+    └── <generated heatmap>.png
+
+data/loan_verification.db
+```
+
+The `data/` contents and `.env` are ignored by Git.
+
+## Configuration
+
+| Variable | Required | Default | Purpose |
+| --- | --- | --- | --- |
+| `GEMINI_API_KEY` | Yes for AI workflows | empty | Gemini Developer API key |
+| `GEMINI_MODEL` | No | `gemini-2.5-flash` | Model used by every LLM feature |
+| `LOCAL_STORAGE_PATH` | No | `data/documents` | Local customer documents and artifacts |
+| `SQLITE_DATABASE_PATH` | No | `data/loan_verification.db` | Local application-status database |
+| `BACKEND_HOST` | No | `127.0.0.1` | FastAPI bind host |
+| `BACKEND_PORT` | No | `8000` | FastAPI port |
+| `CORS_ORIGINS` | No | local React/Vite ports | Comma-separated FastAPI CORS origins |
+| `VITE_API_BASE_URL` | No | `http://localhost:8000` | FastAPI URL used by the frontend |
+| `LOG_LEVEL` | No | `INFO` | Python logging level |
+| `TESSERACT_CMD` | No | executable on `PATH` | Optional full Tesseract executable path |
+| `POPPLER_PATH` | No | executables on `PATH` | Optional Poppler `bin` directory |
+
+The API can start and expose local status/result routes without a Gemini key. A key is required only when running an LLM-powered verification workflow.
+
+## API compatibility
+
+FastAPI remains the application server and continues to expose interactive OpenAPI documentation at `/docs` and `/redoc`. The existing UI-facing routes remain available:
+
+- `GET /customers`
+- `POST /run_workflow`
+- `GET /results/{customer_id}`
+- `GET /gradcam/{customer_id}/{filename}`
+- `POST /send_email`
+- `POST /send_sms`
+- `POST /escalate`
+- `POST /approve_loan`
+- `GET /approved-loans`
+- `GET /human-escalations`
+
+The response property `descision_making_agent` intentionally remains misspelled to preserve the existing frontend/API contract.
+
+Email and SMS endpoints currently record the requested action in local application logs; they do not contact an external delivery provider.
+
+## Tests and checks
+
 ```bash
-cd backend
-python main.py
-```
-Backend runs on: `http://localhost:8000`
-
-**Terminal 2 - Start Frontend:**
-```bash
-cd frontend
-npm run dev
-```
-Frontend runs on: `http://localhost:3000`
-
-## Project Structure
-
-```
-Python/
-├── README.md                     # This file
-├── SETUP.md                      # Detailed setup guide
-├── requirements.txt              # Python dependencies
-├── .gitignore                    # Git ignore rules
-├── .env                          # Environment variables (not in repo)
-│
-├── backend/
-│   ├── main.py                   # FastAPI server
-│   └── requirements.txt          # Backend dependencies
-│
-├── frontend/
-│   ├── src/
-│   │   ├── App.jsx              # Main application
-│   │   ├── HomePage.jsx         # Dashboard homepage
-│   │   ├── ApprovedLoansPage.jsx
-│   │   └── HumanEscalationPage.jsx
-│   ├── package.json
-│   └── node_modules/
-│
-├── orchestration_strands.py      # Workflow orchestrator
-├── da_strands.py                 # Document analyzer agent
-├── cv_strands.py                 # Cross-validation agent
-├── agent_strands.py              # Account aggregator agent
-├── decision_agent_strands.py     # Decision making agent
-│
-└── Documents/                    # Local temp storage (gitignored)
+python -m pytest
+python -m compileall -q . -x frontend/node_modules
+npm --prefix frontend run build
 ```
 
-## Core Components
-
-### 1. Document Analyzer Agent (`da_strands.py`)
-- **ResNet50 Model**: Pre-trained CNN for image classification
-- **Error Level Analysis (ELA)**: Detects JPEG compression artifacts
-- **Noise Residual Analysis**: Identifies inconsistencies in image noise
-- **GradCAM Visualization**: Generates heatmaps highlighting suspicious regions
-- **Ensemble Scoring**: Combines multiple techniques for accuracy
-
-### 2. Cross-Validation Agent (`cv_strands.py`)
-- Payslip ↔ Offer Letter validation
-- Bank Statement ↔ Payslip verification
-- Payslip ↔ Form16 tax consistency check
-- Name, salary, and tax reconciliation
-
-### 3. Account Aggregator Agent (`agent_strands.py`)
-- Verifies PAN, UAN, account numbers
-- Cross-checks financial data with AA framework
-- Validates income, tax, and loan obligations
-
-### 4. Decision Agent (`decision_agent_strands.py`)
-- AWS Bedrock LLM integration (Claude)
-- Calculates DTI ratio and loan eligibility
-- Generates loan plans with multiple tenure options
-- Risk assessment and final decision
-
-### 5. Orchestration Layer (`orchestration_strands.py`)
-- Multi-agent workflow management
-- Parallel and sequential execution
-- State management and error handling
-- S3 upload/download coordination
-
-##  Agentic Workflow
-
-The system uses a **multi-agent orchestration** approach with parallel and sequential execution:
-
-```
-START
-  |
-  |─► doc_analyzer ──────┐
-  |    (Parallel)        |
-  |                      |
-  └─► cross_validator ───┤
-       (Parallel)        | 
-       |                 |
-       ▼                 |
-    aa_agent ────────────┤
-    (Sequential)         |
-                         ▼
-                   decision_agent
-                    (Sequential)
-                         |
-                         |
-                         ▼
-                       END
-```
-
-### Execution Flow:
-
-1. **Parallel Execution (Node 1 & 2)**:
-   - **Document Analyzer**: Detects tampering using ResNet50 + ELA + Noise Analysis
-   - **Cross Validator**: Validates data across payslip, offer, bank statement, Form16
-
-2. **Sequential Execution (Node 3)**:
-   - **AA Agent**: Verifies financial data from Account Aggregator (triggered after cross-validation)
-
-3. **Sequential Execution (Node 4)**:
-   - **Decision Agent**: AWS Bedrock LLM analyzes all agent results and makes final decision
-
-4. **Sequential Execution (Node 5)**:
-   - **Finalizer**: Combines all results, saves to S3, updates application lists
-
-### Decision Outcomes:
-
-```mermaid
-graph LR
-    A[Decision Agent] --> B{Decision}
-    B -->|Approved| C[✅ Approved Loans]
-    B -->|Needs Review| D[⚠️ Human Escalation]
-    B -->|Rejected| E[❌ Rejected]
-```
-
-## User Interface
-
-### Dashboard
-- **New Applicants**: View and process pending applications
-- **Human Escalations**: Review flagged cases
-- **Approved Loans**: Track approved loan IDs
-
-### Application Review
-- Document upload status
-- Tampering detection results with GradCAM heatmaps
-- Cross-validation report
-- AA verification status
-- Final decision with loan plans
-
-## Security & Privacy
-
-- ✅ AWS credentials stored in `.env` (gitignored)
-- ✅ Documents stored in S3 with encryption
-- ✅ No sensitive data in repository
-- ✅ GradCAM images uploaded directly to S3
-- ✅ Temporary files cleaned after processing
-- ✅ CORS configured for secure API access
-
-## API Endpoints
-
-### Customer Management
-```
-GET  /customers                    # List all loan applications
-POST /run_workflow                 # Process loan application
-GET  /results/{customer_id}        # Get verification results
-```
-
-### Lists
-```
-GET  /approved-loans               # Get approved loan IDs
-GET  /human-escalations            # Get escalated loan IDs
-```
-
-### Actions
-```
-POST /approve_loan                 # Approve a loan application
-```
-
-**API Documentation**: `http://localhost:8000/docs` (Swagger UI)
-
-## Testing
-
-### Upload Sample Documents to S3
-```bash
-aws s3 cp LID1755598891411/ s3://documents-loaniq/LID1755598891411/ --recursive
-```
-
-### Test API
-```bash
-# List customers
-curl http://localhost:8000/customers
-
-# Run workflow
-curl -X POST http://localhost:8000/run_workflow \
-  -H "Content-Type: application/json" \
-  -d '{"customer_id": "LID1755598891411"}'
-
-# Get results
-curl http://localhost:8000/results/LID1755598891411
-```
-
-## Required Documents
-
-For each loan application, upload to S3:
-- ✅ `payslip.pdf` - Latest salary slip
-- ✅ `offer.pdf` or `Offer BreakUp.png` - Job offer letter
-- ✅ `Account Statement.pdf` - Bank statement
-- ✅ `form16.pdf` - Tax certificate
-- ✅ `AA_data.json` - Account aggregator data
+A live end-to-end verification additionally requires sample customer documents, native OCR tools, and a valid `GEMINI_API_KEY`.
 
 ## Troubleshooting
 
-### Issue: Poppler not found
-**Solution**: Install Poppler and add to system PATH
+### `GEMINI_API_KEY is not configured`
 
-### Issue: AWS credentials error
-**Solution**: Configure `.env` file with valid AWS credentials
+Copy `.env.example` to `.env`, add a valid key, and restart the backend.
 
-### Issue: Frontend can't connect to backend
-**Solution**: Ensure backend is running on port 8000, check CORS settings
+### Tesseract is not found
 
-### Issue: S3 upload fails
-**Solution**: Verify S3 bucket permissions and AWS IAM roles
+Install Tesseract and ensure `tesseract` is on `PATH`, or set `TESSERACT_CMD` to the executable's full path.
 
-### Issue: GradCAM generation fails
-**Solution**: Ensure PyTorch and torchvision are installed correctly
+### PDF page count or Poppler error
 
-## Data Flow
+Install Poppler tools and ensure `pdftoppm` is on `PATH`, or set `POPPLER_PATH` to the Poppler binary directory.
 
-1. **Upload**: Documents uploaded to S3 bucket
-2. **Download**: Backend downloads to temp folder
-3. **Analysis**: Multi-agent processing pipeline
-4. **Results**: Results uploaded back to S3
-5. **Cleanup**: Temporary files deleted
-6. **Display**: Frontend fetches and displays results
+### Customer is not shown
 
-##  Technology Stack
+Ensure the customer has a folder under `LOCAL_STORAGE_PATH`, then run:
 
-### Backend
-- **Framework**: FastAPI, Uvicorn
-- **AI/ML**: PyTorch, torchvision, ResNet50
-- **Image Processing**: OpenCV, Pillow, scikit-image
-- **PDF Processing**: pdf2image, pytesseract, PyMuPDF
-- **Cloud**: AWS Bedrock (Claude), S3, boto3
-- **Orchestration**: Strands SDK
-
-### Frontend
-- **Framework**: React 18
-- **UI Library**: Material-UI (MUI)
-- **Icons**: Material Icons, Lucide
-- **HTTP Client**: Axios
-- **Build Tool**: Vite
-
-### Infrastructure
-- **Storage**: AWS S3
-- **LLM**: AWS Bedrock (Claude Sonnet)
-- **OCR**: Tesseract
-- **PDF Rendering**: Poppler
-
-##  Environment Variables
-
-```env
-# AWS Configuration
-AWS_ACCESS_KEY_ID=your_access_key_here
-AWS_SECRET_ACCESS_KEY=your_secret_key_here
-AWS_REGION=us-east-1
-
-# S3 Configuration
-S3_BUCKET_NAME=documents-loaniq
-
-# Backend Configuration (Optional)
-BACKEND_PORT=8000
-FRONTEND_PORT=3000
+```bash
+python scripts/init_local.py
 ```
 
-## Documentation
+### Reset local state
 
-- **Setup Guide**: See [SETUP.md](SETUP.md)
-- **API Docs**: http://localhost:8000/docs
-- **Workflow Details**: See `orchestration_strands.py`
+Stop the application and remove the SQLite file and generated outputs:
 
-## Contributing
-
-Contributions are welcome! Please follow these steps:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## License
-
-Proprietary - All rights reserved
-
-## Authors
-
-- Development Team - Initial work and ongoing maintenance
-
-## Acknowledgments
-
-- AWS Bedrock for LLM capabilities
-- Strands SDK for agent orchestration
-- Open source community for libraries and tools
-
-
+```bash
+rm -f data/loan_verification.db
+find data/documents -name results.json -delete
+rm -rf data/documents/*/gradcam
+python scripts/init_local.py
+```

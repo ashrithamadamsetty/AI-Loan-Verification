@@ -1,15 +1,11 @@
-from strands import Agent, tool
 import json
 import os
 import re
 from tabulate import tabulate
 
-print("🚀 Strands Decision Agent loaded successfully!")
-
 # ===========================================
 # Tool 1: Verify PAN Details
 # ===========================================
-@tool
 def verify_pan_details(inputs: str) -> str:
     """
     Checks if PAN number in AA data follows correct format (AAAAA9999A pattern).
@@ -36,7 +32,6 @@ def verify_pan_details(inputs: str) -> str:
 # ===========================================
 # Tool 2: Check Tax Paid Consistency
 # ===========================================
-@tool
 def check_tax_paid_consistency(inputs: str) -> str:
     """
     Verifies if tax paid in AA data matches tax deducted in payslip documents.
@@ -66,7 +61,6 @@ def check_tax_paid_consistency(inputs: str) -> str:
 # ===========================================
 # Tool 3: Verify Bank Account
 # ===========================================
-@tool
 def verify_bank_account_decision(inputs: str) -> str:
     """
     Validates bank account number and currency in AA data match with documents.
@@ -153,7 +147,6 @@ def recursive_search(obj):
 # ===========================================
 # Tool 4: Extract Financial Data
 # ===========================================
-@tool
 def extract_financial_data(file_path: str):
     """Extracts salary, balance, tax, and loan info from AA_data.json with proper field mapping."""
     if not os.path.exists(file_path):
@@ -216,7 +209,6 @@ def calculate_emi(principal, rate, months):
     emi = principal * r * ((1 + r) ** months) / (((1 + r) ** months) - 1)
     return emi
 
-@tool
 def calculate_loan_plans(prompt: str):
     """
     Calculates loan eligibility and generates loan plans with different tenures.
@@ -333,53 +325,33 @@ def calculate_loan_plans(prompt: str):
         import traceback
         return {"error": f"{str(e)}\n{traceback.format_exc()}"}
 
-# ===========================================
-# Strands Decision Agent
-# ===========================================
-decision_agent = Agent(
-    name="DecisionAgent",
-    tools=[
-        verify_pan_details,
-        check_tax_paid_consistency,
-        verify_bank_account_decision,
-        extract_financial_data,
-        calculate_loan_plans
-    ],
-    system_prompt=(
-        "You are a financial decision agent for loan approval with expertise in risk assessment and loan structuring. "
-        "\n\nYour responsibilities:"
-        "\n1. ALWAYS use extract_financial_data tool to get income, EMI, and loan data from provided JSON files"
-        "\n2. ALWAYS calculate DTI (Debt-to-Income) ratio: DTI = (Monthly EMI / Monthly Income) * 100"
-        "\n3. ALWAYS use calculate_loan_plans tool to generate loan plans with different tenures and interest rates"
-        "\n4. Calculate LTV (Loan-to-Value) ratio if collateral information is available"
-        "\n5. Assess risk based on: document tampering, DTI ratio (<20% Low, 20-35% Medium, >35% High), and verification failures"
-        "\n6. Provide loan recommendations with specific amounts in INR, interest rates, EMI, and tenure options"
-        "\n7. Always mention currency (INR) for all financial amounts"
-        "\n8. Return structured responses with clear sections: Document Verification, Cross-Validation, AA Verification, Financial Analysis (with DTI), Loan Eligibility, Loan Plans (table format), Risk Assessment, and Final Decision"
-        "\n\nIMPORTANT OUTPUT FORMATTING:"
-        "\n- Use PLAIN TEXT ONLY - no markdown, no asterisks (**), no bold, no italics, no special characters"
-        "\n- No checkmarks, no emojis, no symbols"
-        "\n- Write in simple, clear sentences"
-        "\n- For loan plans section, copy the EXACT table output from calculate_loan_plans tool with all formatting intact"
-        "\n- Use 'percent' instead of '%' symbol in text"
-        "\n\nUse your tools proactively to extract data and calculate loan plans. Provide detailed, data-driven reasoning for all decisions."
-    )
-)
+DECISION_SYSTEM_PROMPT = """You are a financial decision agent for loan approval with expertise in risk assessment and loan structuring.
+Assess risk based on document tampering, DTI ratio (below 20 percent Low, 20-35 percent Medium, above 35 percent High), and verification failures.
+Provide loan recommendations with specific INR amounts, interest rates, EMI, and tenure options.
+Return exactly the JSON shape requested by the user. Keep the response field plain text without markdown, emojis, or decorative symbols.
+"""
+
+
+class GeminiDecisionAgent:
+    """Callable adapter that preserves the previous decision-agent contract."""
+
+    def __init__(self, gemini=None):
+        from gemini_service import get_gemini_service
+
+        self.gemini = gemini or get_gemini_service()
+
+    def __call__(self, prompt: str) -> str:
+        result = self.gemini.generate_json(
+            prompt,
+            system_instruction=DECISION_SYSTEM_PROMPT,
+        )
+        return json.dumps(result, ensure_ascii=False)
+
+
+def decision_agent():
+    return GeminiDecisionAgent()
+
 
 def descision_agent():
-    """Return the Strands Decision agent."""
-    return decision_agent
-
-# ===========================================
-# Example Usage
-# ===========================================
-if __name__ == "__main__":
-    query = "Based on the data perform risk based pricing considering all factors suggest what loans with what interest given to this user AA_data.json and final_results.json. Give output based on the currency and mention currency while giving output."
-    
-    agent = descision_agent()
-    
-    try:
-        response = agent(query)
-        print("\n🧠 Final Response:\n", response)
-    except Exception as e:
-        print(f"❌ Error: {e}")
+    """Backward-compatible alias for the original misspelled public function."""
+    return decision_agent()

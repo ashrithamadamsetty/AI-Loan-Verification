@@ -17,6 +17,7 @@ import {
   Person as PersonIcon,
 } from '@mui/icons-material';
 import axios from 'axios';
+import { API_BASE_URL } from './config.js';
 
 const ApprovedLoansPage = ({ onBack }) => {
   const [approvedLoans, setApprovedLoans] = useState([]);
@@ -30,7 +31,7 @@ const ApprovedLoansPage = ({ onBack }) => {
   const fetchApprovedLoans = async () => {
     try {
       setLoading(true);
-      const response = await axios.get('http://localhost:8000/approved-loans');
+      const response = await axios.get(`${API_BASE_URL}/approved-loans`);
       setApprovedLoans(response.data.approved_loans || []);
       setError(null);
     } catch (err) {

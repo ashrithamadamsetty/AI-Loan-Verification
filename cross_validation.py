@@ -4,39 +4,23 @@ from pdf2image import convert_from_path
 import json
 import os
 import re
-from strands import Agent
-from strands.models import BedrockModel
+from gemini_service import GeminiService, get_gemini_service
 
-# ===== Set OCR Paths for Windows =====
-TESSERACT_CMD = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-POPPLER_PATH = r"C:\Program Files\poppler\Library\bin"
-
-# Check if Tesseract is installed
-if os.path.exists(TESSERACT_CMD):
+# Optional executable overrides; system PATH is used by default.
+TESSERACT_CMD = os.getenv("TESSERACT_CMD", "").strip()
+POPPLER_PATH = os.getenv("POPPLER_PATH", "").strip()
+if TESSERACT_CMD:
     pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
-else:
-    print("⚠️ WARNING: Tesseract not found at", TESSERACT_CMD)
-    print("   Please install Tesseract-OCR from: https://github.com/UB-Mannheim/tesseract/wiki")
+POPPLER_INSTALLED = bool(POPPLER_PATH and os.path.isdir(POPPLER_PATH))
 
-# Check if Poppler is installed
-POPPLER_INSTALLED = os.path.exists(POPPLER_PATH)
-if not POPPLER_INSTALLED:
-    
-    print("   Please install Poppler from: https://github.com/oschwartz10612/poppler-windows/releases/")
-    print("   Extract to: C:\\Program Files\\poppler\\")
-    print("   The bin folder should be at: C:\\Program Files\\poppler\\Library\\bin\\")
-    
-
-class CrossValidationCoreBedrock:
-    def __init__(self, model_name="deepseek.v3-v1:0"):
-        # Initialize Bedrock model
-        self.model = BedrockModel(model_id=model_name)
-        # Create a simple agent for LLM requests
-        self.agent = Agent(
-            model=self.model,
-            system_prompt="You are a document extraction AI. Extract information from documents and return ONLY valid JSON, no explanations."
+class CrossValidationCore:
+    def __init__(self, gemini: GeminiService | None = None):
+        self.gemini = gemini or get_gemini_service()
+        self.system_instruction = (
+            "You are a document extraction AI. Extract and compare information from "
+            "documents and return only valid JSON without explanations."
         )
-        print(f"✅ Initialized CrossValidationCoreBedrock with model: {model_name}")
+        print(f"Initialized CrossValidationCore with Gemini model: {self.gemini.model}")
 
     # ===== OCR Extraction =====
     def extract_text_from_image(self, image_path):
@@ -93,36 +77,17 @@ class CrossValidationCoreBedrock:
             content = "\n".join(lines).strip()
         return content
 
-    # ===== Shared LLM Request Function using Strands Agent =====
+    # ===== Shared Gemini Request Function =====
     def _send_llm_request(self, prompt):
-        print("Sending LLM request...")
+        print("Sending Gemini request...")
         try:
-            # Use Strands agent to generate response
-            response = self.agent(prompt)
-            
-            # Extract content from response
-            if isinstance(response, str):
-                content = response
-            elif hasattr(response, 'content'):
-                content = response.content
-            elif isinstance(response, dict) and 'content' in response:
-                content = response['content']
-            else:
-                content = str(response)
-            
-            # Clean the response
-            content = self.clean_llm_response(content)
-            
-            # Try to parse as JSON
-            try:
-                parsed = json.loads(content)
-                return parsed
-            except json.JSONDecodeError as e:
-                print(f"❌ Failed to parse JSON: {e}")
-                print(f"   Raw content (first 500 chars):\n{content[:500]}")
-                return {}
-        except Exception as e:
-            print(f"❌ Strands Agent request failed: {e}")
+            result = self.gemini.generate_json(
+                prompt,
+                system_instruction=self.system_instruction,
+            )
+            return result if isinstance(result, dict) else {}
+        except Exception as exc:
+            print(f"Gemini request failed: {exc}")
             return {}
 
     # ===== Offer Letter Extraction =====

@@ -1,17 +1,3 @@
-# Backend API specific dependencies
-# Install from root: pip install -r requirements.txt
-# This file is for backend-specific dependencies only
-
-# Web Framework
-fastapi
-uvicorn
-python-multipart
-
-# AWS Services
-boto3
-
-# CORS Support
-fastapi-cors
-
-# For importing other modules
-# All other dependencies are in root requirements.txt
+# Install the complete application dependencies from the repository root:
+#   pip install -r requirements.txt
+-r ../requirements.txt

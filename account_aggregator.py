@@ -1,26 +1,18 @@
-from strands import Agent, tool
-from strands.models import BedrockModel
-
 # Supporting libraries
 import json
 import re
 import warnings
 warnings.filterwarnings('ignore')
 
-print("🚀 Strands Agents SDK imported successfully!")
-print("📊 AWS Workshop: Ready to build your first agent!")
-
 # ===========================================
 # 🔹 Tool 1: Greeting Tool
 # ===========================================
-@tool
 def greet_user(query: str) -> str:
     return "Hello! The agent is working correctly."
 
 # ===========================================
 # 🔹 Tool 2: Verify AA Data
 # ===========================================
-@tool
 def verify_aa_data(inputs: str) -> str:
     """
     Verifies extracted offer/payslip/bank document data with AA (Account Aggregator) data.
@@ -84,7 +76,6 @@ def verify_aa_data(inputs: str) -> str:
 # ===========================================
 # 🔹 Tool 3: Verify PAN
 # ===========================================
-@tool
 def verify_pan_details(inputs: str) -> str:
     try:
         aa_path, _ = inputs.split("|")
@@ -105,7 +96,6 @@ def verify_pan_details(inputs: str) -> str:
 # ===========================================
 # 🔹 Tool 4: Verify Bank Account
 # ===========================================
-@tool
 def verify_bank_account(inputs: str) -> str:
     print("AHAH")
     try:
@@ -134,7 +124,6 @@ def verify_bank_account(inputs: str) -> str:
 # ===========================================
 # 🔹 Tool 5: Loan Eligibility
 # ===========================================
-@tool
 def calculate_risk_based_loan_eligibility(inputs: str) -> str:
     """
     inputs: 'aa_json_path|final_results_json_path'
@@ -205,37 +194,3 @@ def calculate_risk_based_loan_eligibility(inputs: str) -> str:
         }, indent=2)
     except Exception as e:
         return f"Error calculating risk-based loan eligibility: {e}"
-
-# ===========================================
-# 🔹 Bedrock Model
-# ===========================================
-#model = BedrockModel(
-#    model_id="apac.anthropic.claude-sonnet-4-20250514-v1:0"
-#)
-
-print("✅ AWS Bedrock model configured for Strands!")
-print("🎯 Ready to create your agentsssssss")
-
-# ===========================================
-# 🔹 Create Strands Agent
-# ===========================================
-budget_agent = Agent(
-    #model=model,
-    tools=[
-        greet_user,
-        verify_aa_data,
-        verify_pan_details,
-        verify_bank_account,
-        calculate_risk_based_loan_eligibility
-    ]
-)
-
-# ===========================================
-# 🔹 Sample Query
-# ===========================================
-sample_query = (
-    "verify bank account details in aa_data.json and extracted_documents_1.json and calculate how much can loan can the user avail"
-)
-
-response = budget_agent(sample_query)
-print("\n🧠 Agent Response:\n", response)

@@ -17,6 +17,7 @@ import {
   Person as PersonIcon,
 } from '@mui/icons-material';
 import axios from 'axios';
+import { API_BASE_URL } from './config.js';
 
 const HumanEscalationPage = ({ onBack }) => {
   const [escalations, setEscalations] = useState([]);
@@ -30,7 +31,7 @@ const HumanEscalationPage = ({ onBack }) => {
   const fetchEscalations = async () => {
     try {
       setLoading(true);
-      const response = await axios.get('http://localhost:8000/human-escalations');
+      const response = await axios.get(`${API_BASE_URL}/human-escalations`);
       setEscalations(response.data.escalations || []);
       setError(null);
     } catch (err) {
