@@ -55,6 +55,7 @@ import {
 import HomePage from './HomePage';
 import ApprovedLoansPage from './ApprovedLoansPage';
 import HumanEscalationPage from './HumanEscalationPage';
+import { API_BASE_URL } from './config.js';
 
 function App() {
   const [customers, setCustomers] = useState([]);
@@ -65,7 +66,6 @@ function App() {
   const [activeTab, setActiveTab] = useState(0);
   const [currentView, setCurrentView] = useState('home'); // 'home', 'app', 'escalations', 'approved'
 
-  const API_BASE_URL = 'http://localhost:8000';
 
   // Fetch customers on mount
   useEffect(() => {
@@ -622,13 +622,11 @@ function App() {
   const renderDocumentAnalyzerTab = () => {
     const docResults = results?.results?.document_analyzer_agent_results || {};
     
-    // Helper to download GradCAM image from S3 via backend
-    const handleDownloadGradCAM = async (s3Url, filename) => {
+    // Download a locally stored GradCAM image through the backend
+    const handleDownloadGradCAM = async (artifactUrl, filename) => {
       try {
-        // Extract filename from S3 URL
-        // s3://documents-loaniq/LID123/gradcam/filename.png -> filename.png
-        const urlParts = s3Url.split('/');
-        const imageFilename = urlParts[urlParts.length - 1];
+        const urlParts = (artifactUrl || '').split('/');
+        const imageFilename = urlParts[urlParts.length - 1] || filename;
         
         // Use backend endpoint to download with proper authentication
         const url = `${API_BASE_URL}/gradcam/${selectedCustomer}/${imageFilename}`;
@@ -738,7 +736,7 @@ function App() {
                           tamperingLevel = getTamperingLevelFromScore(ensembleScore);
                         }
                         
-                        const hasGradCAM = page.gradcam_s3_url || page.gradcam_s3_key;
+                        const hasGradCAM = page.gradcam_url || page.gradcam_path;
                         const showDownload = (tamperingLevel === 'High' || tamperingLevel === 'Medium') && hasGradCAM;
                         
                         return (
@@ -775,7 +773,7 @@ function App() {
                               <IconButton 
                                 size="small"
                                 color="primary"
-                                onClick={() => handleDownloadGradCAM(page.gradcam_s3_url, `page${page.page}_gradcam.png`)}
+                                onClick={() => handleDownloadGradCAM(page.gradcam_url, `page${page.page}_gradcam.png`)}
                                 sx={{ 
                                   ml: 1,
                                   bgcolor: 'rgba(25, 118, 210, 0.08)',
@@ -1779,7 +1777,7 @@ function App() {
               mt: 0.5
             }}
           >
-            Powered by AWS Bedrock & Strands AI
+            Powered locally with Google Gemini
           </Typography>
         </Box>
       </Container>

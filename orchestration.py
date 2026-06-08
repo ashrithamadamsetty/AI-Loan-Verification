@@ -1,9 +1,9 @@
 
 from typing import Dict, Any, List
-from cv_strands import CrossValidationCoreBedrock
-from da_strands import DocumentAnalyzerCore
-from agent_strands import verify_aa_data
-from decision_agent_strands import descision_agent
+from cross_validation import CrossValidationCore
+from document_analyzer import DocumentAnalyzerCore
+from account_aggregator import verify_aa_data
+from decision_agent import calculate_loan_plans, decision_agent, extract_financial_data
 import json
 import os
 import re
@@ -27,7 +27,7 @@ def extract_agent_response(response):
 
 
 # -----------------------------
-# Workflow State Management (Strands-compatible)
+# Workflow State Management
 # -----------------------------
 class VerificationState:
     """State management for verification workflow"""
@@ -42,12 +42,12 @@ class VerificationState:
         self.bank_vs_payslip = {}
         self.payslip_vs_form16 = {}
         self.aa_verification = {}
-        self.descision_result = {}
+        self.decision_result = {}
         self.workflow_status = "started"
         self.doc_errors = []
         self.cross_errors = []
         self.aa_errors = []
-        self.descision_errors = []
+        self.decision_errors = []
         self.errors = []
 
 
@@ -55,7 +55,7 @@ class VerificationState:
 # Orchestrator Agent
 # -----------------------------
 class VerificationOrchestrator:
-    def __init__(self, documents_folder="Documents", loan_id=None):
+    def __init__(self, documents_folder="Documents", loan_id=None, artifact_storage=None):
         self.documents_folder = documents_folder
         
         # Extract loan_id from documents_folder path if not provided
@@ -65,8 +65,8 @@ class VerificationOrchestrator:
             print(f"📋 Extracted loan_id from path: {loan_id}")
         
         self.loan_id = loan_id
-        self.doc_analyzer = DocumentAnalyzerCore(loan_id=loan_id)
-        self.cross_validator = CrossValidationCoreBedrock()
+        self.doc_analyzer = DocumentAnalyzerCore(loan_id=loan_id, storage=artifact_storage)
+        self.cross_validator = CrossValidationCore()
         self.state = VerificationState(documents_folder)
 
         # Track node progress
@@ -74,12 +74,12 @@ class VerificationOrchestrator:
             "doc_analyzer": False,
             "cross_validator": False,
             "aa_agent": False,
-            "descision_agent": False,
+            "decision_agent": False,
             "finalizer": False
         }
         
         # Initialize decision agent
-        self.decision_agent_instance = descision_agent()
+        self.decision_agent_instance = decision_agent()
 
     # -----------------------------
     # Helper Methods
@@ -110,7 +110,7 @@ class VerificationOrchestrator:
             print("   - Detecting manipulation using CNN + ELA + OCR")
             print("   - Calculating risk levels per page")
             print(f"   - Loan ID: {self.loan_id}")
-            print(f"   - GradCAM images will be saved to: s3://documents-loaniq/{self.loan_id}/gradcam/\n")
+            print(f"   - GradCAM images will be saved under local storage for {self.loan_id}/gradcam/\n")
             manipulation_results = {}
             all_docs = [
                 os.path.join(self.documents_folder, f)
@@ -314,7 +314,7 @@ Give detailed output with currency mentioned. Use the available tools to perform
                 "aa_errors": [f"AA verification failed: {str(e)}"]
             }
 
-    def _run_descision_agent(self) -> Dict[str, Any]:
+    def _run_decision_agent(self) -> Dict[str, Any]:
         try:
             print("🎯 NODE 4: DECISION AGENT (Sequential)")
             print("   - Analyzing all verification results")
@@ -327,10 +327,10 @@ Give detailed output with currency mentioned. Use the available tools to perform
             
             if not os.path.exists(aa_data_path):
                 print("⚠️ AA_data.json not found in Documents folder, skipping Decision Agent...")
-                self._update_progress("descision_agent")
+                self._update_progress("decision_agent")
                 return {
-                    "descision_agent": {"status": "skipped", "reason": "AA data file not found in Documents folder"},
-                    "descision_errors": []
+                    "decision_agent": {"status": "skipped", "reason": "AA data file not found in Documents folder"},
+                    "decision_errors": []
                 }
      
             # Load AA_data.json to get loan_amount_requested
@@ -347,13 +347,14 @@ Give detailed output with currency mentioned. Use the available tools to perform
             print("🤖 Initializing Decision Agent with LLM...")
             decision_agent = self.decision_agent_instance
             
-            # Extract financial data from state
+            # Run deterministic financial tools locally before asking Gemini to synthesize the decision.
             payslip_data = self.state.payslip or {}
-            aa_data = self.state.aa_verification or {}
-            
-            # Get salary and EMI from available data
-            salary = payslip_data.get("Net Salary") or payslip_data.get("gross_salary") or 0
-            emi = 0  # Extract from bank statement if available
+            financial_data = extract_financial_data(aa_data_path)
+            loan_plan = calculate_loan_plans(
+                f"Calculate loan for {loan_amount_requested} using {aa_data_path}"
+            )
+            salary = financial_data.get("salary", 0)
+            emi = financial_data.get("emi", 0)
             
             # Create comprehensive query for final decision
             query = f"""You are a financial decision agent for loan approval. Analyze the verification data and provide a comprehensive loan decision.
@@ -366,17 +367,17 @@ VERIFICATION RESULTS:
    - Payslip vs Form16: {json.dumps(self.state.payslip_vs_form16, indent=2)}
 3. AA Verification: {json.dumps(self.state.aa_verification, indent=2)}
 
-FINANCIAL DATA (from verification results):
+FINANCIAL DATA:
 - Payslip Data: {json.dumps(payslip_data, indent=2)}
+- Account Aggregator Financial Data: {json.dumps(financial_data, indent=2)}
 - Monthly Salary: INR {salary}
 - Existing EMI: INR {emi}
+- Precalculated Loan Plan: {json.dumps(loan_plan, indent=2)}
 
 TASK:
-1. MUST call extract_financial_data tool on "{aa_data_path}" to get salary, EMI, existing loans
-2. Calculate DTI ratio: (Monthly EMI / Monthly Income) * 100. Risk levels: <20% Low, 20-35% Medium, >35% High
-3. MUST call calculate_loan_plans tool with EXACT prompt: "Calculate loan for {loan_amount_requested} using {aa_data_path}"
-4. Use the loan_plan_table from calculate_loan_plans tool output in section 6 of your response
-5. Assess overall risk based on document tampering, DTI ratio, cross-validation mismatches, and AA verification failures
+1. Calculate DTI ratio: (Monthly EMI / Monthly Income) * 100. Risk levels: <20% Low, 20-35% Medium, >35% High
+2. Use the exact loan_plan_table from the precalculated loan plan in section 6 of your response
+3. Assess overall risk based on document tampering, DTI ratio, cross-validation mismatches, and AA verification failures
 
 CRITICAL: Return ONLY a raw JSON object. Do NOT wrap it in markdown code blocks. Do NOT use ```json or ```. Just return the plain JSON object starting with {{ and ending with }}.
 
@@ -396,7 +397,7 @@ RETURN JSON FORMAT:
 Use plain text only. No bold, no italics, no markdown. Write in simple sentences. Always mention INR for amounts."
 }}
 
-Use your tools to extract data and calculate loan plans."""
+Use the supplied deterministic financial calculations; do not invent replacement figures."""
 
             print("🔍 Running Decision Agent analysis...\n")
             try:
@@ -470,20 +471,20 @@ Use your tools to extract data and calculate loan plans."""
                     "status": "failed"
                 }
             
-            self._update_progress("descision_agent")
+            self._update_progress("decision_agent")
             return {
-                "descision_agent": decision_result,
-                "descision_errors": []
+                "decision_agent": decision_result,
+                "decision_errors": []
             }
             
         except Exception as e:
             import traceback
             print(f"❌ Decision Agent error: {str(e)}")
             print(f"Traceback:\n{traceback.format_exc()}")
-            self._update_progress("descision_agent")
+            self._update_progress("decision_agent")
             return {
-                "descision_agent": {"status": "error", "error": str(e)},
-                "descision_errors": [f"Decision Agent failed: {str(e)}"]
+                "decision_agent": {"status": "error", "error": str(e)},
+                "decision_errors": [f"Decision Agent failed: {str(e)}"]
             }
 
 
@@ -500,7 +501,7 @@ Use your tools to extract data and calculate loan plans."""
             self.state.doc_errors +
             self.state.cross_errors +
             self.state.aa_errors +
-            self.state.descision_errors
+            self.state.decision_errors
         )
 
         if all_errors:
@@ -565,9 +566,9 @@ Use your tools to extract data and calculate loan plans."""
         self.state.aa_errors = aa_results.get("aa_errors", [])
         
         # Step 4: Run decision agent
-        decision_results = self._run_descision_agent()
-        self.state.descision_result = decision_results.get("descision_agent", {})
-        self.state.descision_errors = decision_results.get("descision_errors", [])
+        decision_results = self._run_decision_agent()
+        self.state.decision_result = decision_results.get("decision_agent", {})
+        self.state.decision_errors = decision_results.get("decision_errors", [])
         
         # Step 5: Finalize
         final_results = self._finalize_workflow()
@@ -606,7 +607,7 @@ Use your tools to extract data and calculate loan plans."""
                         "payslip_vs_form16": final_state.payslip_vs_form16
                     },
                     "account_aggrigator_agent_results": final_state.aa_verification,
-                    "descision_making_agent": final_state.descision_result
+                    "descision_making_agent": final_state.decision_result
                 }
             }
             
@@ -638,7 +639,7 @@ Use your tools to extract data and calculate loan plans."""
                         "payslip_vs_form16": final_state.payslip_vs_form16
                     },
                     "account_aggrigator_agent_results": final_state.aa_verification,
-                    "descision_making_agent": final_state.descision_result
+                    "descision_making_agent": final_state.decision_result
                 },
                 "extracted_documents": extracted_docs,
                 "errors": final_state.errors
